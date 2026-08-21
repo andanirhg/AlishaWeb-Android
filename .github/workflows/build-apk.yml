@@ -13,7 +13,7 @@ jobs:
 
       - name: Extract project
         run: |
-          unzip AlishaWeb-GitHub-Project.zip -d android-project
+          unzip AlishaWeb-GitHub-Project-ICON-STICKY-FIX.zip -d android-project
 
       - name: Setup Java
         uses: actions/setup-java@v4
