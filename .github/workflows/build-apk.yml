@@ -21,12 +21,13 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - name: Beri izin Gradle
+        working-directory: android-project
+        run: chmod +x gradlew
 
       - name: Build APK
         working-directory: android-project
-        run: gradle assembleDebug
+        run: ./gradlew assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
