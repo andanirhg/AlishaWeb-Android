@@ -13,7 +13,7 @@ jobs:
 
       - name: Extract project
         run: |
-          unzip AlishaWeb-PANEL-ADMIN-V19-HERO-SAFE-AREA.zip -d android-project
+          unzip AlishaWeb-V22-DOWNLOAD-APK-FIX.zip -d android-project
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
