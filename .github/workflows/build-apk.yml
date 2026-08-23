@@ -3,6 +3,9 @@ name: Build AlishaWeb APK
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -13,7 +16,9 @@ jobs:
 
       - name: Extract project
         run: |
+          rm -rf android-project
           unzip AlishaWeb-V22-DOWNLOAD-APK-FIX.zip -d android-project
+
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -29,11 +34,21 @@ jobs:
         working-directory: android-project
         run: gradle assembleDebug
 
-      - name: Rename APK
-        run: mv android-project/app/build/outputs/apk/debug/app-debug.apk android-project/app/build/outputs/apk/debug/AlishaWeb.apk
+      - name: Siapkan APK
+        run: |
+          APK=$(find android-project/app/build/outputs/apk -name "*.apk" | head -n 1)
+          cp "$APK" AlishaWeb.apk
 
-      - name: Upload APK
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: AlishaWeb-APK
-          path: android-project/app/build/outputs/apk/debug/*.apk
+          path: AlishaWeb.apk
+
+      - name: Update Release APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: AlishaWeb APK v1.0.0
+          files: AlishaWeb.apk
+          overwrite_files: true
