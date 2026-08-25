@@ -5307,10 +5307,23 @@ function closeAwWelcome(){document.getElementById('awWelcomePopup')?.classList.a
 <script>
 (function(){
   var splash = document.getElementById('awSplash');
-  if(document.documentElement.classList.contains('aw-return')){
+
+  // V34: tampilkan loading hanya sekali selama tab/sesi browser ini masih terbuka.
+  // Refresh/reload pada tab yang sama langsung masuk ke halaman utama.
+  var splashSeen = false;
+  try{
+    splashSeen = sessionStorage.getItem('alishaweb_splash_seen') === '1';
+  }catch(e){}
+
+  if(document.documentElement.classList.contains('aw-return') || splashSeen){
     if(splash) splash.remove();
     return;
   }
+
+  try{
+    sessionStorage.setItem('alishaweb_splash_seen', '1');
+  }catch(e){}
+
   var bar = document.getElementById('awSplashProgress') || {style:{}};
   var value = 0, finished = false;
   var started = Date.now();
