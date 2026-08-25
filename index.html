@@ -5,6 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no">
 <title>AlishaWeb</title>
 
+<!-- V38: cegah flash ke atas saat reload sebelum layout dipulihkan -->
+<script id="aw-v38-refresh-prepaint">
+(function(){
+  try{
+    var nav=performance.getEntriesByType&&performance.getEntriesByType('navigation')[0];
+    var isReload=nav ? nav.type==='reload' : (performance.navigation&&performance.navigation.type===1);
+    var y=parseInt(sessionStorage.getItem('alishaweb_last_scroll_y')||'0',10);
+    if(isReload && isFinite(y) && y>0){
+      document.documentElement.classList.add('aw-refresh-restoring');
+    }
+  }catch(e){}
+})();
+</script>
+
 <style>
 *{
     margin:0;
@@ -14,6 +28,15 @@
 
 html{
     scroll-behavior:smooth;
+}
+
+/* V38: selama reload, layout tetap dihitung tetapi tidak diperlihatkan di posisi 0. */
+html.aw-refresh-restoring{
+    scroll-behavior:auto !important;
+    background:#063d2b;
+}
+html.aw-refresh-restoring body{
+    visibility:hidden !important;
 }
 
 body{
@@ -9388,6 +9411,91 @@ document.addEventListener("DOMContentLoaded",function(){
   else activateHot();
 })();
 </script>
+
+<!-- V38: SMOOTH REFRESH - restore sekali sebelum halaman ditampilkan. HOT V37 tidak diubah. -->
+<script id="aw-v38-smooth-refresh">
+(function(){
+  var KEY_SCROLL='alishaweb_last_scroll_y';
+  var KEY_CATEGORY='alishaweb_last_category';
+  var root=document.documentElement;
+  var restoring=root.classList.contains('aw-refresh-restoring');
+  var saveTimer=0;
+
+  function ssGet(k){ try{return sessionStorage.getItem(k);}catch(e){return null;} }
+  function ssSet(k,v){ try{sessionStorage.setItem(k,String(v));}catch(e){} }
+  function currentY(){ return Math.max(0,window.scrollY||window.pageYOffset||0); }
+  function saveNow(){ if(!restoring) ssSet(KEY_SCROLL,currentY()); }
+
+  try{ if('scrollRestoration' in history) history.scrollRestoration='manual'; }catch(e){}
+
+  window.addEventListener('scroll',function(){
+    if(restoring || saveTimer) return;
+    saveTimer=setTimeout(function(){ saveTimer=0; saveNow(); },100);
+  },{passive:true});
+  window.addEventListener('pagehide',saveNow,true);
+  window.addEventListener('beforeunload',saveNow,true);
+
+  function restoreSavedCategory(){
+    var cat=(ssGet(KEY_CATEGORY)||'').trim();
+    if(!cat) return;
+    var buttons=Array.prototype.slice.call(document.querySelectorAll('.filter-category'));
+    var btn=buttons.find(function(b){ return (b.textContent||'').trim()===cat; });
+    if(btn && typeof window.selectCategory==='function'){
+      try{ window.selectCategory(btn,cat); }catch(e){}
+    }
+  }
+
+  function reveal(){
+    if(!restoring) return;
+    root.classList.remove('aw-refresh-restoring');
+    restoring=false;
+  }
+
+  function restoreBeforeReveal(){
+    if(!restoring) return;
+    var target=parseInt(ssGet(KEY_SCROLL)||'0',10);
+    if(!isFinite(target) || target<=0){ reveal(); return; }
+
+    restoreSavedCategory();
+    var started=performance.now();
+    var lastHeight=-1;
+    var stableFrames=0;
+
+    function frame(){
+      var de=document.documentElement, body=document.body;
+      var height=Math.max(de?de.scrollHeight:0,body?body.scrollHeight:0);
+      var maxY=Math.max(0,height-window.innerHeight);
+      var y=Math.min(target,maxY);
+      window.scrollTo(0,y);
+
+      if(Math.abs(height-lastHeight)<=1) stableFrames++; else stableFrames=0;
+      lastHeight=height;
+
+      var enough=maxY>=target-2;
+      var stable=stableFrames>=5;
+      var timedOut=(performance.now()-started)>1500;
+      if((enough && stable) || timedOut){
+        window.scrollTo(0,Math.min(target,Math.max(0,height-window.innerHeight)));
+        requestAnimationFrame(function(){
+          window.scrollTo(0,Math.min(target,Math.max(0,document.documentElement.scrollHeight-window.innerHeight)));
+          reveal();
+        });
+        return;
+      }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  if(restoring){
+    if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',restoreBeforeReveal,{once:true});
+    else restoreBeforeReveal();
+    /* failsafe: jangan pernah biarkan halaman tersembunyi terlalu lama */
+    setTimeout(reveal,1900);
+  }
+})();
+</script>
+
 </body>
 </html>
 
@@ -9613,202 +9721,33 @@ document.addEventListener("DOMContentLoaded",function(){
 </script>
 
 
-<!-- V35: REFRESH KEMBALI KE POSISI TERAKHIR + POPUP TIDAK MUNCUL ULANG DALAM SESI -->
+<!-- V35 state keeper (V38 mengambil alih restore scroll) -->
 <script id="aw-v35-refresh-state">
 (function(){
   var KEY_POPUP='alishaweb_welcome_closed';
-  var KEY_SCROLL='alishaweb_last_scroll_y';
   var KEY_CATEGORY='alishaweb_last_category';
-
   function ssGet(k){ try{return sessionStorage.getItem(k);}catch(e){return null;} }
   function ssSet(k,v){ try{sessionStorage.setItem(k,String(v));}catch(e){} }
-
-  /* Jika popup sudah pernah ditutup pada tab ini, jangan munculkan lagi saat refresh. */
   function applyWelcomeState(){
     if(ssGet(KEY_POPUP)==='1'){
       var popup=document.getElementById('awWelcomePopup');
       if(popup) popup.classList.add('hide');
-      document.body && document.body.classList.remove('aw-lock');
+      if(document.body) document.body.classList.remove('aw-lock');
     }
   }
-
-  /* Bungkus tombol tutup popup agar status tersimpan selama tab masih terbuka. */
   var oldClose=window.closeAwWelcome;
   window.closeAwWelcome=function(){
     ssSet(KEY_POPUP,'1');
     if(typeof oldClose==='function') oldClose.apply(this,arguments);
-    else {
-      var popup=document.getElementById('awWelcomePopup');
-      if(popup) popup.classList.add('hide');
-    }
+    else { var popup=document.getElementById('awWelcomePopup'); if(popup) popup.classList.add('hide'); }
   };
-
-  /* Simpan kategori terakhir yang dipilih. */
   document.addEventListener('click',function(e){
-    var btn=e.target && e.target.closest ? e.target.closest('.filter-category') : null;
+    var btn=e.target&&e.target.closest?e.target.closest('.filter-category'):null;
     if(btn) ssSet(KEY_CATEGORY,(btn.textContent||'').trim());
   },true);
-
-  /* Simpan posisi scroll secara ringan. */
-  var saveTimer=0;
-  window.addEventListener('scroll',function(){
-    if(saveTimer) return;
-    saveTimer=setTimeout(function(){
-      saveTimer=0;
-      ssSet(KEY_SCROLL,Math.max(0,window.scrollY||window.pageYOffset||0));
-    },120);
-  },{passive:true});
-  window.addEventListener('beforeunload',function(){
-    ssSet(KEY_SCROLL,Math.max(0,window.scrollY||window.pageYOffset||0));
-  });
-
-  function restoreState(){
-    applyWelcomeState();
-
-    var cat=ssGet(KEY_CATEGORY);
-    if(cat){
-      var buttons=[].slice.call(document.querySelectorAll('.filter-category'));
-      var btn=buttons.find(function(b){return (b.textContent||'').trim()===cat;});
-      if(btn && typeof window.selectCategory==='function'){
-        try{ window.selectCategory(btn,cat); }catch(e){}
-      }
-    }
-
-    var y=parseInt(ssGet(KEY_SCROLL)||'0',10);
-    if(isFinite(y) && y>0){
-      /* Render kartu/HOT bisa async, jadi kembalikan posisi beberapa kali sampai layout stabil. */
-      [0,120,350,700].forEach(function(delay){
-        setTimeout(function(){ window.scrollTo(0,y); },delay);
-      });
-    }
-  }
-
   applyWelcomeState();
-  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',restoreState);
-  else restoreState();
-  window.addEventListener('pageshow',function(){ setTimeout(restoreState,50); });
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',applyWelcomeState,{once:true});
 })();
 </script>
 
-
-<!-- V36: FINAL REFRESH POSITION + HOT INITIAL RENDER -->
-<script id="aw-v36-hot-refresh-final">
-(function(){
-  var KEY_SCROLL='alishaweb_last_scroll_y';
-  var KEY_CATEGORY='alishaweb_last_category';
-  var restoring=false;
-  var userInterrupted=false;
-
-  function ssGet(k){ try{return sessionStorage.getItem(k);}catch(e){return null;} }
-  function ssSet(k,v){ try{sessionStorage.setItem(k,String(v));}catch(e){} }
-
-  try{ if('scrollRestoration' in history) history.scrollRestoration='manual'; }catch(e){}
-
-  function currentY(){ return Math.max(0, window.scrollY || window.pageYOffset || 0); }
-  function saveNow(){ if(!restoring) ssSet(KEY_SCROLL,currentY()); }
-
-  /* Simpan posisi paling akhir sebelum reload/tab meninggalkan halaman. */
-  window.addEventListener('pagehide',function(){ ssSet(KEY_SCROLL,currentY()); },true);
-  window.addEventListener('beforeunload',function(){ ssSet(KEY_SCROLL,currentY()); },true);
-
-  /* Jangan melawan pengguna kalau ia mulai menyentuh/scroll saat proses restore. */
-  ['touchstart','pointerdown','wheel'].forEach(function(ev){
-    window.addEventListener(ev,function(){ userInterrupted=true; restoring=false; },{passive:true,capture:true});
-  });
-
-  function activeCategory(){
-    var saved=(ssGet(KEY_CATEGORY)||'').trim();
-    if(saved) return saved;
-    var b=document.querySelector('.filter-category.active');
-    return b ? (b.textContent||'').trim() : 'HOT 🔥';
-  }
-
-  function buttonFor(cat){
-    return Array.prototype.slice.call(document.querySelectorAll('.filter-category')).find(function(b){
-      return (b.textContent||'').trim()===cat;
-    });
-  }
-
-  function forceCategoryRender(){
-    var cat=activeCategory();
-    var btn=buttonFor(cat);
-    if(!btn && cat==='SEMUA') btn=buttonFor('HOT 🔥');
-    if(btn && typeof window.selectCategory==='function'){
-      try{ window.selectCategory(btn,(btn.textContent||'').trim()); }catch(e){}
-    } else if(typeof window.renderCategoryGames==='function'){
-      try{ window.renderCategoryGames(cat); }catch(e){}
-    }
-  }
-
-  /* HOT bergantung pada daftar apps dari Supabase. Paksa render ulang beberapa kali
-     selama fase awal supaya HOT tidak menunggu klik kategori lain. */
-  function ensureHotInitial(){
-    [0,180,450,850,1400,2200,3200].forEach(function(delay){
-      setTimeout(function(){
-        var cat=activeCategory();
-        var active=document.querySelector('.filter-category.active');
-        var txt=active ? (active.textContent||'').trim() : '';
-        if(cat==='HOT 🔥' || txt==='HOT 🔥') forceCategoryRender();
-      },delay);
-    });
-  }
-
-  function restoreScrollPrecisely(){
-    var target=parseInt(ssGet(KEY_SCROLL)||'0',10);
-    if(!isFinite(target) || target<=0) return;
-
-    restoring=true;
-    userInterrupted=false;
-    var started=Date.now();
-    var lastHeight=0;
-    var stable=0;
-
-    function tick(){
-      if(userInterrupted){ restoring=false; return; }
-      var doc=document.documentElement;
-      var body=document.body;
-      var height=Math.max(doc?doc.scrollHeight:0,body?body.scrollHeight:0);
-      var maxY=Math.max(0,height-window.innerHeight);
-      var y=Math.min(target,maxY);
-      window.scrollTo(0,y);
-
-      if(Math.abs(height-lastHeight)<2) stable++; else stable=0;
-      lastHeight=height;
-
-      /* Tunggu layout/data/gambar cukup stabil, tapi jangan lebih dari 3.5 detik. */
-      if((stable>=8 && maxY>=target) || Date.now()-started>3500){
-        window.scrollTo(0,Math.min(target,Math.max(0,height-window.innerHeight)));
-        setTimeout(function(){
-          if(!userInterrupted) window.scrollTo(0,Math.min(target,Math.max(0,document.documentElement.scrollHeight-window.innerHeight)));
-          restoring=false;
-        },180);
-        return;
-      }
-      requestAnimationFrame(tick);
-    }
-    requestAnimationFrame(tick);
-  }
-
-  function boot(){
-    forceCategoryRender();
-    ensureHotInitial();
-    /* Mulai restore setelah render kategori diminta, lalu ulang sesudah window load. */
-    setTimeout(restoreScrollPrecisely,60);
-  }
-
-  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot,{once:true});
-  else boot();
-
-  window.addEventListener('load',function(){
-    ensureHotInitial();
-    setTimeout(restoreScrollPrecisely,80);
-  },{once:true});
-
-  window.addEventListener('pageshow',function(e){
-    if(e.persisted){
-      ensureHotInitial();
-      setTimeout(restoreScrollPrecisely,60);
-    }
-  });
-})();
-</script>
+<!-- V36 restore dinonaktifkan: digantikan V38 agar tidak ada restore ganda/lompatan scroll. -->
