@@ -9751,3 +9751,47 @@ document.addEventListener("DOMContentLoaded",function(){
 </script>
 
 <!-- V36 restore dinonaktifkan: digantikan V38 agar tidak ada restore ganda/lompatan scroll. -->
+
+<!-- V39: HOT INITIAL DISPLAY FIX ONLY. Tidak mengubah query/sort/order HOT V37. -->
+<script id="aw-v39-hot-initial-display-fix">
+(function(){
+  var HOT='HOT 🔥';
+
+  function activeHot(){
+    var active=document.querySelector('.filter-category.active');
+    if(active && (active.textContent||'').trim()===HOT) return true;
+    try{
+      return (sessionStorage.getItem('alishaweb_last_category')||'').trim()===HOT;
+    }catch(e){ return false; }
+  }
+
+  function hotButton(){
+    return Array.prototype.slice.call(document.querySelectorAll('.filter-category')).find(function(b){
+      return (b.textContent||'').trim()===HOT;
+    });
+  }
+
+  function showHotIfNeeded(){
+    if(!activeHot()) return;
+    var btn=hotButton();
+    if(btn && typeof window.selectCategory==='function'){
+      try{ window.selectCategory(btn,HOT); return; }catch(e){}
+    }
+    if(typeof window.renderCategoryGames==='function'){
+      try{ window.renderCategoryGames(HOT); }catch(e){}
+    }
+  }
+
+  function boot(){
+    /* Data apps/HOT datang async. Hanya ulang render kategori aktif; tidak menyortir ulang. */
+    [0,180,450,850,1400,2200,3200].forEach(function(ms){
+      setTimeout(showHotIfNeeded,ms);
+    });
+  }
+
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot,{once:true});
+  else boot();
+  window.addEventListener('load',boot,{once:true});
+})();
+</script>
+
