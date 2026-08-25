@@ -9752,7 +9752,7 @@ document.addEventListener("DOMContentLoaded",function(){
 
 <!-- V36 restore dinonaktifkan: digantikan V38 agar tidak ada restore ganda/lompatan scroll. -->
 
-<!-- V39: HOT INITIAL DISPLAY FIX ONLY. Tidak mengubah query/sort/order HOT V37. -->
+<!-- V40: HOT initial display tanpa scrollIntoView. Query/sort/order HOT V37 tetap tidak diubah. -->
 <script id="aw-v39-hot-initial-display-fix">
 (function(){
   var HOT='HOT 🔥';
@@ -9773,9 +9773,15 @@ document.addEventListener("DOMContentLoaded",function(){
 
   function showHotIfNeeded(){
     if(!activeHot()) return;
+
+    /* V40: jangan panggil selectCategory() saat boot/refresh.
+       selectCategory HOT memakai scrollIntoView(), dan pemanggilan ulang
+       pada timer V39 membuat halaman terseret ke area kategori.
+       Cukup pertahankan status aktif lalu render HOT langsung. */
     var btn=hotButton();
-    if(btn && typeof window.selectCategory==='function'){
-      try{ window.selectCategory(btn,HOT); return; }catch(e){}
+    if(btn){
+      document.querySelectorAll('.filter-category').forEach(function(b){ b.classList.remove('active'); });
+      btn.classList.add('active');
     }
     if(typeof window.renderCategoryGames==='function'){
       try{ window.renderCategoryGames(HOT); }catch(e){}
