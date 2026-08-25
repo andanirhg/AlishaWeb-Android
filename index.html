@@ -6543,6 +6543,9 @@ function renderCategoryGames(category){
             const img = document.createElement("img");
             img.src = game.icon;
             img.alt = game.name;
+            /* V32 OPT: gambar di luar layar tidak perlu langsung didecode */
+            img.loading = "lazy";
+            img.decoding = "async";
             img.style.width = "100%";
             img.style.height = "100%";
             img.style.objectFit = "cover";
@@ -8382,28 +8385,12 @@ html,body{background:radial-gradient(circle at 50% 0%,#06391d 0%,#012411 34%,#00
     if(el) el.textContent=value;
   }
 
-  async function countApk(){
-    // DATABASE APK = jumlah APK aktif yang benar-benar tersimpan di tabel public.apps.
-    // Jangan menjumlahkan kartu HTML karena itu membuat angka tidak sesuai database.
-    if(isSupabaseConfigured()){
-      try{
-        const rows = await awSupabaseRequest(
-          "/rest/v1/apps?select=id&active=eq.true",
-          {method:"GET"}
-        );
-        if(Array.isArray(rows)){
-          setText("awTotalApk",fmt(rows.length));
-          return;
-        }
-      }catch(e){
-        console.warn("Total DATABASE APK gagal dimuat, memakai fallback lokal:",e);
-      }
+  function countApk(){
+    let total=0;
+    if(typeof categoryGames!=="undefined" && Array.isArray(categoryGames)){
+      total += categoryGames.length;
     }
-
-    // Fallback jika Supabase sedang tidak dapat diakses.
-    const total=(typeof categoryGames!=="undefined" && Array.isArray(categoryGames))
-      ? categoryGames.length
-      : 0;
+    total += document.querySelectorAll(".category-section .category-grid .category-card").length;
     setText("awTotalApk",fmt(total));
   }
 
@@ -8496,7 +8483,8 @@ html,body{background:radial-gradient(circle at 50% 0%,#06391d 0%,#012411 34%,#00
   }
 
   async function refreshHomeStats(){
-    await Promise.all([countApk(),loadTodayVisitors(),loadDownloads()]);
+    countApk();
+    await Promise.all([loadTodayVisitors(),loadDownloads()]);
   }
 
   if(document.readyState==="loading"){
@@ -9080,9 +9068,6 @@ document.addEventListener("DOMContentLoaded",function(){
       syncAppsFromAdmin(),
       syncHeroFromAdmin()
     ]);
-    if(typeof window.refreshAlishaHomeStats === "function"){
-      window.refreshAlishaHomeStats();
-    }
   }
 
   if(document.readyState === "loading"){
@@ -9209,6 +9194,138 @@ document.addEventListener("DOMContentLoaded",function(){
 })();
 </script>
 
+
+<style id="awPerformanceV32">
+/* V32 PERFORMANCE TEST — tampilan tetap sama, kerja browser di luar layar dikurangi */
+#gameGrid .game-card{
+  content-visibility:auto;
+  contain-intrinsic-size:auto 150px;
+}
+.category-card{
+  content-visibility:auto;
+  contain-intrinsic-size:auto 120px;
+}
+/* Browser tidak perlu mengecat bagian halaman yang jauh di luar viewport. */
+@supports (content-visibility:auto){
+  .hero-slide:not(.active){content-visibility:auto;}
+}
+</style>
+<script id="awPerformanceV32JS">
+(function(){
+  function optimizeImages(root){
+    (root || document).querySelectorAll('img').forEach(function(img){
+      /* Logo/splash/hero pertama tetap prioritas; kartu dan gambar lain lazy. */
+      if(img.closest && (img.closest('#gameGrid') || img.closest('.category-cards'))){
+        img.loading='lazy';
+      }
+      img.decoding='async';
+    });
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',function(){optimizeImages(document);});
+  else optimizeImages(document);
+  if('MutationObserver' in window){
+    new MutationObserver(function(muts){
+      muts.forEach(function(m){m.addedNodes.forEach(function(n){if(n.nodeType===1) optimizeImages(n);});});
+    }).observe(document.documentElement,{childList:true,subtree:true});
+  }
+})();
+</script>
+
+<script id="awHot50CategoryV33">
+/* HOT 🔥: maksimal 50 APK yang PALING BARU ditekan Download oleh pengunjung. */
+(function(){
+  const HOT_LABEL = "HOT 🔥";
+  let hotGames = [];
+  let hotLoaded = false;
+  let hotLoading = null;
+
+  function allGames(){
+    return (typeof categoryGames !== "undefined" && Array.isArray(categoryGames)) ? categoryGames : [];
+  }
+  function gameId(game){
+    return (typeof makeGameId === "function") ? makeGameId(game) : String(game && game.name || "app").toLowerCase();
+  }
+  function gameMap(){
+    const m = new Map();
+    allGames().forEach(g => m.set(gameId(g), g));
+    return m;
+  }
+
+  async function loadHot50(force){
+    if(hotLoading) return hotLoading;
+    if(hotLoaded && !force) return hotGames;
+    hotLoading = (async function(){
+      try{
+        if(typeof awSupabaseRequest !== "function") return hotGames;
+        const rows = await awSupabaseRequest(
+          "/rest/v1/app_stats?select=app_id,last_downloaded_at&last_downloaded_at=not.is.null&order=last_downloaded_at.desc&limit=50",
+          {method:"GET"}
+        );
+        const map = gameMap();
+        hotGames = (Array.isArray(rows) ? rows : []).map(r => map.get(String(r.app_id))).filter(Boolean).slice(0,50);
+        hotLoaded = true;
+      }catch(e){ console.warn("HOT 50 gagal dimuat:", e); }
+      finally{ hotLoading = null; }
+      return hotGames;
+    })();
+    return hotLoading;
+  }
+
+  const baseRender = window.renderCategoryGames;
+  if(typeof baseRender === "function"){
+    window.renderCategoryGames = function(category){
+      if(category !== HOT_LABEL) return baseRender(category);
+      const changed=[];
+      hotGames.forEach(function(g){ changed.push([g,g.category]); g.category=HOT_LABEL; });
+      try{ baseRender(HOT_LABEL); }
+      finally{ changed.forEach(x => x[0].category=x[1]); }
+      const title=document.getElementById("gameSectionTitle");
+      if(title) title.textContent=HOT_LABEL;
+      if(!hotGames.length){
+        const grid=document.getElementById("gameGrid");
+        if(grid) grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:24px 12px;opacity:.78;font-size:12px">Belum ada APK HOT. Daftar akan terisi otomatis setelah pengunjung menekan Download.</div>';
+      }
+    };
+  }
+
+  const baseSelect = window.selectCategory;
+  window.selectCategory = function(button, category){
+    if(category !== HOT_LABEL) return baseSelect(button, category);
+    document.querySelectorAll(".filter-category").forEach(b=>b.classList.remove("active"));
+    if(button){ button.classList.add("active"); button.scrollIntoView({behavior:"smooth",block:"nearest",inline:"center"}); }
+    window.renderCategoryGames(HOT_LABEL);
+    loadHot50(true).then(function(){
+      const active=document.querySelector(".filter-category.active");
+      if(active && (active.textContent||"").trim()===HOT_LABEL) window.renderCategoryGames(HOT_LABEL);
+    });
+  };
+
+  /* Setelah download berhasil dihitung, tandai cache HOT agar urutan berikutnya segar. */
+  const baseInc = window.incrementGameDownload;
+  if(typeof baseInc === "function"){
+    window.incrementGameDownload = async function(game){
+      const result = await baseInc(game);
+      hotLoaded=false;
+      loadHot50(true);
+      return result;
+    };
+  }
+
+  function activateHot(){
+    const buttons=[...document.querySelectorAll(".filter-category")];
+    const first=buttons.find(b => (b.textContent||"").trim()==="SEMUA") || buttons[0];
+    if(first){
+      first.textContent=HOT_LABEL;
+      first.setAttribute("onclick","selectCategory(this, this.textContent.trim())");
+      buttons.forEach(b=>b.classList.remove("active"));
+      first.classList.add("active");
+    }
+    loadHot50(true).then(()=>window.renderCategoryGames(HOT_LABEL));
+  }
+  if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",activateHot);
+  else activateHot();
+})();
+</script>
 </body>
 </html>
 
