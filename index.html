@@ -9640,3 +9640,126 @@ document.addEventListener("DOMContentLoaded",function(){
   window.addEventListener('pageshow',function(){ setTimeout(restoreState,50); });
 })();
 </script>
+
+
+<!-- V36: FINAL REFRESH POSITION + HOT INITIAL RENDER -->
+<script id="aw-v36-hot-refresh-final">
+(function(){
+  var KEY_SCROLL='alishaweb_last_scroll_y';
+  var KEY_CATEGORY='alishaweb_last_category';
+  var restoring=false;
+  var userInterrupted=false;
+
+  function ssGet(k){ try{return sessionStorage.getItem(k);}catch(e){return null;} }
+  function ssSet(k,v){ try{sessionStorage.setItem(k,String(v));}catch(e){} }
+
+  try{ if('scrollRestoration' in history) history.scrollRestoration='manual'; }catch(e){}
+
+  function currentY(){ return Math.max(0, window.scrollY || window.pageYOffset || 0); }
+  function saveNow(){ if(!restoring) ssSet(KEY_SCROLL,currentY()); }
+
+  /* Simpan posisi paling akhir sebelum reload/tab meninggalkan halaman. */
+  window.addEventListener('pagehide',function(){ ssSet(KEY_SCROLL,currentY()); },true);
+  window.addEventListener('beforeunload',function(){ ssSet(KEY_SCROLL,currentY()); },true);
+
+  /* Jangan melawan pengguna kalau ia mulai menyentuh/scroll saat proses restore. */
+  ['touchstart','pointerdown','wheel'].forEach(function(ev){
+    window.addEventListener(ev,function(){ userInterrupted=true; restoring=false; },{passive:true,capture:true});
+  });
+
+  function activeCategory(){
+    var saved=(ssGet(KEY_CATEGORY)||'').trim();
+    if(saved) return saved;
+    var b=document.querySelector('.filter-category.active');
+    return b ? (b.textContent||'').trim() : 'HOT 🔥';
+  }
+
+  function buttonFor(cat){
+    return Array.prototype.slice.call(document.querySelectorAll('.filter-category')).find(function(b){
+      return (b.textContent||'').trim()===cat;
+    });
+  }
+
+  function forceCategoryRender(){
+    var cat=activeCategory();
+    var btn=buttonFor(cat);
+    if(!btn && cat==='SEMUA') btn=buttonFor('HOT 🔥');
+    if(btn && typeof window.selectCategory==='function'){
+      try{ window.selectCategory(btn,(btn.textContent||'').trim()); }catch(e){}
+    } else if(typeof window.renderCategoryGames==='function'){
+      try{ window.renderCategoryGames(cat); }catch(e){}
+    }
+  }
+
+  /* HOT bergantung pada daftar apps dari Supabase. Paksa render ulang beberapa kali
+     selama fase awal supaya HOT tidak menunggu klik kategori lain. */
+  function ensureHotInitial(){
+    [0,180,450,850,1400,2200,3200].forEach(function(delay){
+      setTimeout(function(){
+        var cat=activeCategory();
+        var active=document.querySelector('.filter-category.active');
+        var txt=active ? (active.textContent||'').trim() : '';
+        if(cat==='HOT 🔥' || txt==='HOT 🔥') forceCategoryRender();
+      },delay);
+    });
+  }
+
+  function restoreScrollPrecisely(){
+    var target=parseInt(ssGet(KEY_SCROLL)||'0',10);
+    if(!isFinite(target) || target<=0) return;
+
+    restoring=true;
+    userInterrupted=false;
+    var started=Date.now();
+    var lastHeight=0;
+    var stable=0;
+
+    function tick(){
+      if(userInterrupted){ restoring=false; return; }
+      var doc=document.documentElement;
+      var body=document.body;
+      var height=Math.max(doc?doc.scrollHeight:0,body?body.scrollHeight:0);
+      var maxY=Math.max(0,height-window.innerHeight);
+      var y=Math.min(target,maxY);
+      window.scrollTo(0,y);
+
+      if(Math.abs(height-lastHeight)<2) stable++; else stable=0;
+      lastHeight=height;
+
+      /* Tunggu layout/data/gambar cukup stabil, tapi jangan lebih dari 3.5 detik. */
+      if((stable>=8 && maxY>=target) || Date.now()-started>3500){
+        window.scrollTo(0,Math.min(target,Math.max(0,height-window.innerHeight)));
+        setTimeout(function(){
+          if(!userInterrupted) window.scrollTo(0,Math.min(target,Math.max(0,document.documentElement.scrollHeight-window.innerHeight)));
+          restoring=false;
+        },180);
+        return;
+      }
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  function boot(){
+    forceCategoryRender();
+    ensureHotInitial();
+    /* Mulai restore setelah render kategori diminta, lalu ulang sesudah window load. */
+    setTimeout(restoreScrollPrecisely,60);
+  }
+
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot,{once:true});
+  else boot();
+
+  window.addEventListener('load',function(){
+    ensureHotInitial();
+    setTimeout(restoreScrollPrecisely,80);
+  },{once:true});
+
+  window.addEventListener('pageshow',function(e){
+    if(e.persisted){
+      ensureHotInitial();
+      setTimeout(restoreScrollPrecisely,60);
+    }
+  });
+})();
+</script>
