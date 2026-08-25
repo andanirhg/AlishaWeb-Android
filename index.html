@@ -9562,3 +9562,81 @@ document.addEventListener("DOMContentLoaded",function(){
   else init();
 })();
 </script>
+
+
+<!-- V35: REFRESH KEMBALI KE POSISI TERAKHIR + POPUP TIDAK MUNCUL ULANG DALAM SESI -->
+<script id="aw-v35-refresh-state">
+(function(){
+  var KEY_POPUP='alishaweb_welcome_closed';
+  var KEY_SCROLL='alishaweb_last_scroll_y';
+  var KEY_CATEGORY='alishaweb_last_category';
+
+  function ssGet(k){ try{return sessionStorage.getItem(k);}catch(e){return null;} }
+  function ssSet(k,v){ try{sessionStorage.setItem(k,String(v));}catch(e){} }
+
+  /* Jika popup sudah pernah ditutup pada tab ini, jangan munculkan lagi saat refresh. */
+  function applyWelcomeState(){
+    if(ssGet(KEY_POPUP)==='1'){
+      var popup=document.getElementById('awWelcomePopup');
+      if(popup) popup.classList.add('hide');
+      document.body && document.body.classList.remove('aw-lock');
+    }
+  }
+
+  /* Bungkus tombol tutup popup agar status tersimpan selama tab masih terbuka. */
+  var oldClose=window.closeAwWelcome;
+  window.closeAwWelcome=function(){
+    ssSet(KEY_POPUP,'1');
+    if(typeof oldClose==='function') oldClose.apply(this,arguments);
+    else {
+      var popup=document.getElementById('awWelcomePopup');
+      if(popup) popup.classList.add('hide');
+    }
+  };
+
+  /* Simpan kategori terakhir yang dipilih. */
+  document.addEventListener('click',function(e){
+    var btn=e.target && e.target.closest ? e.target.closest('.filter-category') : null;
+    if(btn) ssSet(KEY_CATEGORY,(btn.textContent||'').trim());
+  },true);
+
+  /* Simpan posisi scroll secara ringan. */
+  var saveTimer=0;
+  window.addEventListener('scroll',function(){
+    if(saveTimer) return;
+    saveTimer=setTimeout(function(){
+      saveTimer=0;
+      ssSet(KEY_SCROLL,Math.max(0,window.scrollY||window.pageYOffset||0));
+    },120);
+  },{passive:true});
+  window.addEventListener('beforeunload',function(){
+    ssSet(KEY_SCROLL,Math.max(0,window.scrollY||window.pageYOffset||0));
+  });
+
+  function restoreState(){
+    applyWelcomeState();
+
+    var cat=ssGet(KEY_CATEGORY);
+    if(cat){
+      var buttons=[].slice.call(document.querySelectorAll('.filter-category'));
+      var btn=buttons.find(function(b){return (b.textContent||'').trim()===cat;});
+      if(btn && typeof window.selectCategory==='function'){
+        try{ window.selectCategory(btn,cat); }catch(e){}
+      }
+    }
+
+    var y=parseInt(ssGet(KEY_SCROLL)||'0',10);
+    if(isFinite(y) && y>0){
+      /* Render kartu/HOT bisa async, jadi kembalikan posisi beberapa kali sampai layout stabil. */
+      [0,120,350,700].forEach(function(delay){
+        setTimeout(function(){ window.scrollTo(0,y); },delay);
+      });
+    }
+  }
+
+  applyWelcomeState();
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',restoreState);
+  else restoreState();
+  window.addEventListener('pageshow',function(){ setTimeout(restoreState,50); });
+})();
+</script>
