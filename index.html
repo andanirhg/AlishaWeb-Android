@@ -8382,12 +8382,28 @@ html,body{background:radial-gradient(circle at 50% 0%,#06391d 0%,#012411 34%,#00
     if(el) el.textContent=value;
   }
 
-  function countApk(){
-    let total=0;
-    if(typeof categoryGames!=="undefined" && Array.isArray(categoryGames)){
-      total += categoryGames.length;
+  async function countApk(){
+    // DATABASE APK = jumlah APK aktif yang benar-benar tersimpan di tabel public.apps.
+    // Jangan menjumlahkan kartu HTML karena itu membuat angka tidak sesuai database.
+    if(isSupabaseConfigured()){
+      try{
+        const rows = await awSupabaseRequest(
+          "/rest/v1/apps?select=id&active=eq.true",
+          {method:"GET"}
+        );
+        if(Array.isArray(rows)){
+          setText("awTotalApk",fmt(rows.length));
+          return;
+        }
+      }catch(e){
+        console.warn("Total DATABASE APK gagal dimuat, memakai fallback lokal:",e);
+      }
     }
-    total += document.querySelectorAll(".category-section .category-grid .category-card").length;
+
+    // Fallback jika Supabase sedang tidak dapat diakses.
+    const total=(typeof categoryGames!=="undefined" && Array.isArray(categoryGames))
+      ? categoryGames.length
+      : 0;
     setText("awTotalApk",fmt(total));
   }
 
@@ -8480,8 +8496,7 @@ html,body{background:radial-gradient(circle at 50% 0%,#06391d 0%,#012411 34%,#00
   }
 
   async function refreshHomeStats(){
-    countApk();
-    await Promise.all([loadTodayVisitors(),loadDownloads()]);
+    await Promise.all([countApk(),loadTodayVisitors(),loadDownloads()]);
   }
 
   if(document.readyState==="loading"){
@@ -9065,6 +9080,9 @@ document.addEventListener("DOMContentLoaded",function(){
       syncAppsFromAdmin(),
       syncHeroFromAdmin()
     ]);
+    if(typeof window.refreshAlishaHomeStats === "function"){
+      window.refreshAlishaHomeStats();
+    }
   }
 
   if(document.readyState === "loading"){
