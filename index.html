@@ -9024,6 +9024,17 @@ document.addEventListener("DOMContentLoaded",function(){
       categoryGames.push(game);
     });
 
+    /* V41 FIX: setelah data APK dari Panel Admin selesai masuk, muat ulang
+       daftar HOT. Sebelumnya HOT sempat dihitung saat categoryGames belum
+       selesai sinkron sehingga kosong sampai pengguna pindah kategori. */
+    if(typeof window.awRefreshHot50 === "function"){
+      try{
+        await window.awRefreshHot50(true);
+      }catch(e){
+        console.warn("Refresh HOT setelah sync apps gagal:", e);
+      }
+    }
+
     if(typeof renderCategoryGames === "function"){
       let current = "SEMUA";
       const activeBtn = document.querySelector(".filter-category.active");
@@ -9329,6 +9340,10 @@ document.addEventListener("DOMContentLoaded",function(){
     })();
     return hotLoading;
   }
+
+  /* Dipakai sinkronisasi Panel Admin agar HOT dihitung ulang setelah
+     categoryGames benar-benar sudah terisi. */
+  window.awRefreshHot50 = loadHot50;
 
   const baseRender=window.renderCategoryGames;
   if(typeof baseRender === "function"){
