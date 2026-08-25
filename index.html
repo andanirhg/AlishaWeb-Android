@@ -9351,3 +9351,66 @@ document.addEventListener("DOMContentLoaded",function(){
   opacity: 1 !important;
 }
 </style>
+
+<script id="awSearchFunctionalFixV29">
+/* FIX PENCARIAN: bekerja pada input Android/WebView dan mencari semua APK */
+(function(){
+  function norm(v){ return String(v || "").toLowerCase().trim(); }
+
+  function applySearch(){
+    var input = document.getElementById("search");
+    var q = norm(input && input.value);
+
+    if(!q){
+      var active = document.querySelector(".filter-category.active");
+      var category = active ? (active.textContent || "SEMUA").trim() : "SEMUA";
+      if(typeof window.renderCategoryGames === "function"){
+        window.renderCategoryGames(category || "SEMUA");
+      }
+      return;
+    }
+
+    /* Saat mencari, tampilkan SEMUA dulu supaya hasil dari kategori lain ikut ditemukan. */
+    document.querySelectorAll(".filter-category").forEach(function(btn){
+      btn.classList.toggle("active", (btn.textContent || "").trim() === "SEMUA");
+    });
+    if(typeof window.renderCategoryGames === "function"){
+      window.renderCategoryGames("SEMUA");
+    }
+
+    var games = Array.isArray(window.categoryGames) ? window.categoryGames :
+                (typeof categoryGames !== "undefined" && Array.isArray(categoryGames) ? categoryGames : []);
+    var cards = document.querySelectorAll("#gameGrid .game-card");
+    var shown = 0;
+
+    cards.forEach(function(card, index){
+      var game = games[index] || {};
+      var haystack = norm([
+        card.dataset.name,
+        game.name,
+        game.category,
+        game.developer
+      ].join(" "));
+      var match = haystack.indexOf(q) !== -1;
+      card.style.setProperty("display", match ? "" : "none", "important");
+      if(match) shown++;
+    });
+
+    var title = document.getElementById("gameSectionTitle");
+    if(title){ title.textContent = shown ? ("HASIL PENCARIAN (" + shown + ")") : "APLIKASI TIDAK DITEMUKAN"; }
+  }
+
+  function init(){
+    var input = document.getElementById("search");
+    if(!input) return;
+    input.removeAttribute("onkeyup");
+    input.addEventListener("input", applySearch);
+    input.addEventListener("keyup", applySearch);
+    input.addEventListener("change", applySearch);
+    window.searchGames = applySearch;
+  }
+
+  if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+  else init();
+})();
+</script>
