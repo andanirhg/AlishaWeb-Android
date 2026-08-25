@@ -9244,10 +9244,11 @@ document.addEventListener("DOMContentLoaded",function(){
 })();
 </script>
 
-<script id="awHot50CategoryV33">
-/* HOT 🔥: maksimal 50 APK yang PALING BARU ditekan Download oleh pengunjung. */
+<script id="awHot50CategoryV37">
+/* HOT 🔥 V37: urutan mutlak last_downloaded_at DESC + cache cepat. */
 (function(){
   const HOT_LABEL = "HOT 🔥";
+  const CACHE_KEY = "aw_hot50_v37";
   let hotGames = [];
   let hotLoaded = false;
   let hotLoading = null;
@@ -9260,38 +9261,72 @@ document.addEventListener("DOMContentLoaded",function(){
   }
   function gameMap(){
     const m = new Map();
-    allGames().forEach(g => m.set(gameId(g), g));
+    allGames().forEach(g => m.set(String(gameId(g)), g));
     return m;
+  }
+  function saveCache(rows){
+    try{
+      sessionStorage.setItem(CACHE_KEY, JSON.stringify((rows||[]).slice(0,50).map(r=>({
+        app_id:String(r.app_id),
+        last_downloaded_at:r.last_downloaded_at || null
+      }))));
+    }catch(e){}
+  }
+  function restoreCache(){
+    try{
+      const rows=JSON.parse(sessionStorage.getItem(CACHE_KEY)||"[]");
+      if(!Array.isArray(rows) || !rows.length) return;
+      const map=gameMap();
+      hotGames=rows.map(r=>map.get(String(r.app_id))).filter(Boolean).slice(0,50);
+    }catch(e){}
   }
 
   async function loadHot50(force){
     if(hotLoading) return hotLoading;
     if(hotLoaded && !force) return hotGames;
-    hotLoading = (async function(){
+    hotLoading=(async function(){
       try{
         if(typeof awSupabaseRequest !== "function") return hotGames;
-        const rows = await awSupabaseRequest(
+        /* Supabase yang mengurutkan + membatasi, bukan browser. */
+        const rows=await awSupabaseRequest(
           "/rest/v1/app_stats?select=app_id,last_downloaded_at&last_downloaded_at=not.is.null&order=last_downloaded_at.desc&limit=50",
           {method:"GET"}
         );
-        const map = gameMap();
-        hotGames = (Array.isArray(rows) ? rows : []).map(r => map.get(String(r.app_id))).filter(Boolean).slice(0,50);
-        hotLoaded = true;
-      }catch(e){ console.warn("HOT 50 gagal dimuat:", e); }
-      finally{ hotLoading = null; }
+        const orderedRows=Array.isArray(rows)?rows:[];
+        const map=gameMap();
+        hotGames=orderedRows.map(r=>map.get(String(r.app_id))).filter(Boolean).slice(0,50);
+        saveCache(orderedRows);
+        hotLoaded=true;
+      }catch(e){
+        console.warn("HOT 50 gagal dimuat:",e);
+      }finally{
+        hotLoading=null;
+      }
       return hotGames;
     })();
     return hotLoading;
   }
 
-  const baseRender = window.renderCategoryGames;
+  const baseRender=window.renderCategoryGames;
   if(typeof baseRender === "function"){
-    window.renderCategoryGames = function(category){
+    window.renderCategoryGames=function(category){
       if(category !== HOT_LABEL) return baseRender(category);
+
+      /* Penting: baseRender memfilter categoryGames sesuai urutan array asli.
+         Untuk HOT, susun array sementara mengikuti hasil Supabase agar urutan
+         benar-benar newest download -> paling atas. Setelah render, pulihkan. */
+      const games=allGames();
+      const original=games.slice();
       const changed=[];
-      hotGames.forEach(function(g){ changed.push([g,g.category]); g.category=HOT_LABEL; });
-      try{ baseRender(HOT_LABEL); }
-      finally{ changed.forEach(x => x[0].category=x[1]); }
+      try{
+        hotGames.forEach(function(g){ changed.push([g,g.category]); g.category=HOT_LABEL; });
+        games.splice(0,games.length,...hotGames);
+        baseRender(HOT_LABEL);
+      }finally{
+        games.splice(0,games.length,...original);
+        changed.forEach(x=>x[0].category=x[1]);
+      }
+
       const title=document.getElementById("gameSectionTitle");
       if(title) title.textContent=HOT_LABEL;
       if(!hotGames.length){
@@ -9301,11 +9336,15 @@ document.addEventListener("DOMContentLoaded",function(){
     };
   }
 
-  const baseSelect = window.selectCategory;
-  window.selectCategory = function(button, category){
-    if(category !== HOT_LABEL) return baseSelect(button, category);
+  const baseSelect=window.selectCategory;
+  window.selectCategory=function(button,category){
+    if(category !== HOT_LABEL) return baseSelect(button,category);
     document.querySelectorAll(".filter-category").forEach(b=>b.classList.remove("active"));
-    if(button){ button.classList.add("active"); button.scrollIntoView({behavior:"smooth",block:"nearest",inline:"center"}); }
+    if(button){
+      button.classList.add("active");
+      button.scrollIntoView({behavior:"smooth",block:"nearest",inline:"center"});
+    }
+    /* Cache tampil instan; request terbaru berjalan di belakang. */
     window.renderCategoryGames(HOT_LABEL);
     loadHot50(true).then(function(){
       const active=document.querySelector(".filter-category.active");
@@ -9313,12 +9352,19 @@ document.addEventListener("DOMContentLoaded",function(){
     });
   };
 
-  /* Setelah download berhasil dihitung, tandai cache HOT agar urutan berikutnya segar. */
-  const baseInc = window.incrementGameDownload;
+  const baseInc=window.incrementGameDownload;
   if(typeof baseInc === "function"){
-    window.incrementGameDownload = async function(game){
-      const result = await baseInc(game);
+    window.incrementGameDownload=async function(game){
+      const result=await baseInc(game);
+      /* Respons terasa instan: pindahkan APK yang baru didownload ke atas lokal. */
+      const id=String(gameId(game));
+      hotGames=[game].concat(hotGames.filter(g=>String(gameId(g))!==id)).slice(0,50);
       hotLoaded=false;
+      try{
+        const cached=hotGames.map(g=>({app_id:String(gameId(g)),last_downloaded_at:null}));
+        saveCache(cached);
+      }catch(e){}
+      /* Sinkronkan lagi ke urutan resmi Supabase di background. */
       loadHot50(true);
       return result;
     };
@@ -9326,15 +9372,18 @@ document.addEventListener("DOMContentLoaded",function(){
 
   function activateHot(){
     const buttons=[...document.querySelectorAll(".filter-category")];
-    const first=buttons.find(b => (b.textContent||"").trim()==="SEMUA") || buttons[0];
+    const first=buttons.find(b=>(b.textContent||"").trim()==="SEMUA") || buttons.find(b=>(b.textContent||"").trim()===HOT_LABEL) || buttons[0];
     if(first){
       first.textContent=HOT_LABEL;
       first.setAttribute("onclick","selectCategory(this, this.textContent.trim())");
       buttons.forEach(b=>b.classList.remove("active"));
       first.classList.add("active");
     }
+    restoreCache();
+    if(hotGames.length) window.renderCategoryGames(HOT_LABEL);
     loadHot50(true).then(()=>window.renderCategoryGames(HOT_LABEL));
   }
+
   if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",activateHot);
   else activateHot();
 })();
