@@ -5295,7 +5295,151 @@ header > img,
  </div>
 </div>
 <script id="alisha-welcome-popup-script">
-function closeAwWelcome(){document.getElementById('awWelcomePopup')?.classList.add('hide');}
+function closeAwWelcome(){
+  document.getElementById('awWelcomePopup')?.classList.add('hide');
+  awStartMusic();
+}
+
+function awStartMusic(){
+  const a=document.getElementById('awBgMusic');
+  const b=document.getElementById('awMusicToggle');
+  if(!a) return;
+  a.muted=false;
+  a.volume=0.55;
+  a.play().then(()=>{ if(b){b.textContent='🔊';b.classList.add('show');b.setAttribute('aria-label','Matikan musik');b.dataset.musicState='on';} }).catch(()=>{ if(b)b.classList.add('show'); });
+}
+function awToggleMusic(){
+  const a=document.getElementById('awBgMusic');
+  const b=document.getElementById('awMusicToggle');
+  if(!a||!b) return;
+
+  // Gunakan mute/unmute agar Android/WebView tidak perlu memanggil play() ulang.
+  // Audio tetap berjalan di belakang saat 🔇, sehingga tap berikutnya langsung kembali 🔊.
+  const isOff = (b.dataset.musicState==='off') || a.muted;
+
+  if(isOff){
+    a.muted=false;
+    a.volume=0.55;
+    b.textContent='🔊';
+    b.setAttribute('aria-label','Matikan musik');
+    b.dataset.musicState='on';
+
+    // Fallback jika audio sempat berhenti karena browser/halaman.
+    if(a.paused){
+      const p=a.play();
+      if(p && typeof p.catch==='function') p.catch(()=>{});
+    }
+  }else{
+    a.muted=true;
+    b.textContent='🔇';
+    b.setAttribute('aria-label','Hidupkan musik');
+    b.dataset.musicState='off';
+  }
+}
+
+// Tombol musik: tap = ON/OFF, geser = hanya vertikal. Posisi disimpan.
+(function(){
+  function initAwMusicDrag(){
+    const b=document.getElementById('awMusicToggle');
+    if(!b || b.dataset.dragReady==='1') return;
+    b.dataset.dragReady='1';
+
+    const saved=parseFloat(localStorage.getItem('awMusicTop'));
+    if(Number.isFinite(saved)){
+      const max=Math.max(8,window.innerHeight-b.offsetHeight-8);
+      b.style.top=Math.min(Math.max(8,saved),max)+'px';
+      b.style.bottom='auto';
+    }
+
+    let active=false,startY=0,startTop=0,moved=false,pointerId=null;
+    let ignoreNextClick=false;
+
+    function begin(y,id){
+      active=true;
+      moved=false;
+      startY=y;
+      pointerId=id;
+      startTop=b.getBoundingClientRect().top;
+    }
+
+    function move(y){
+      if(!active) return;
+      const dy=y-startY;
+      if(Math.abs(dy)>7) moved=true;
+      if(!moved) return;
+      const max=Math.max(8,window.innerHeight-b.offsetHeight-8);
+      const top=Math.min(Math.max(8,startTop+dy),max);
+      b.style.top=top+'px';
+      b.style.bottom='auto';
+    }
+
+    function finish(){
+      if(!active) return;
+      active=false;
+      if(moved){
+        const top=b.getBoundingClientRect().top;
+        localStorage.setItem('awMusicTop',String(top));
+        ignoreNextClick=true;
+        setTimeout(()=>{ignoreNextClick=false;},250);
+      }else{
+        // Tap singkat: toggle langsung. Ini penting untuk Android/WebView.
+        awToggleMusic();
+        ignoreNextClick=true;
+        setTimeout(()=>{ignoreNextClick=false;},250);
+      }
+    }
+
+    if(window.PointerEvent){
+      b.addEventListener('pointerdown',e=>{
+        begin(e.clientY,e.pointerId);
+        try{b.setPointerCapture(e.pointerId);}catch(_){ }
+      });
+      b.addEventListener('pointermove',e=>{
+        if(active && (pointerId===null || e.pointerId===pointerId)){
+          move(e.clientY);
+          if(moved) e.preventDefault();
+        }
+      },{passive:false});
+      b.addEventListener('pointerup',e=>{
+        if(pointerId===null || e.pointerId===pointerId) finish();
+        pointerId=null;
+      });
+      b.addEventListener('pointercancel',()=>{active=false;pointerId=null;});
+    }else{
+      b.addEventListener('touchstart',e=>{
+        const t=e.changedTouches[0];
+        begin(t.clientY,'touch');
+      },{passive:true});
+      b.addEventListener('touchmove',e=>{
+        const t=e.changedTouches[0];
+        move(t.clientY);
+        if(moved) e.preventDefault();
+      },{passive:false});
+      b.addEventListener('touchend',()=>finish(),{passive:true});
+      b.addEventListener('touchcancel',()=>{active=false;});
+    }
+
+    // Fallback klik untuk browser yang tidak mengirim pointer/touch dengan normal.
+    b.addEventListener('click',e=>{
+      if(ignoreNextClick){
+        e.preventDefault();
+        return;
+      }
+      awToggleMusic();
+    });
+
+    window.addEventListener('resize',()=>{
+      if(!b.style.top)return;
+      const max=Math.max(8,window.innerHeight-b.offsetHeight-8);
+      const top=Math.min(Math.max(8,parseFloat(b.style.top)||8),max);
+      b.style.top=top+'px';
+      localStorage.setItem('awMusicTop',String(top));
+    });
+  }
+
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',initAwMusicDrag,{once:true});
+  else initAwMusicDrag();
+})();
 </script>
 
 
@@ -8424,12 +8568,31 @@ html,body{background:radial-gradient(circle at 50% 0%,#06391d 0%,#012411 34%,#00
     if(el) el.textContent=value;
   }
 
-  function countApk(){
-    let total=0;
-    if(typeof categoryGames!=="undefined" && Array.isArray(categoryGames)){
-      total += categoryGames.length;
+  async function loadDatabaseApk(){
+    /* V50 FIX: Database APK harus mengikuti tabel public.apps di Supabase.
+       Jangan menjumlahkan kartu DOM karena itu membuat data terhitung ganda. */
+    if(isSupabaseConfigured()){
+      try{
+        const rows = await awSupabaseRequest(
+          "/rest/v1/apps?select=id,active",
+          {method:"GET"}
+        );
+        if(Array.isArray(rows)){
+          const total = rows.filter(function(row){
+            return row.active !== false;
+          }).length;
+          setText("awTotalApk",fmt(total));
+          return;
+        }
+      }catch(e){
+        console.warn("Jumlah Database APK Supabase gagal, memakai data lokal:",e);
+      }
     }
-    total += document.querySelectorAll(".category-section .category-grid .category-card").length;
+
+    /* Fallback hanya memakai daftar APK aktif yang sedang dimuat. */
+    const total = (typeof categoryGames!=="undefined" && Array.isArray(categoryGames))
+      ? categoryGames.length
+      : 0;
     setText("awTotalApk",fmt(total));
   }
 
@@ -8522,8 +8685,7 @@ html,body{background:radial-gradient(circle at 50% 0%,#06391d 0%,#012411 34%,#00
   }
 
   async function refreshHomeStats(){
-    countApk();
-    await Promise.all([loadTodayVisitors(),loadDownloads()]);
+    await Promise.all([loadDatabaseApk(),loadTodayVisitors(),loadDownloads()]);
   }
 
   if(document.readyState==="loading"){
@@ -9514,6 +9676,14 @@ document.addEventListener("DOMContentLoaded",function(){
 })();
 </script>
 
+
+<audio id="awBgMusic" src="rr666-bgm.mp3" loop preload="auto"></audio>
+<button id="awMusicToggle" type="button" aria-label="Matikan musik">🔊</button>
+<style id="awFloatingMusicStyle">
+#awMusicToggle{position:fixed;right:14px;bottom:88px;width:42px;height:42px;border-radius:50%;border:1px solid rgba(255,255,255,.28);background:rgba(8,22,10,.78);color:#fff;font-size:20px;display:none;align-items:center;justify-content:center;z-index:99998;box-shadow:0 4px 18px rgba(0,0,0,.35);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);padding:0;line-height:1;cursor:pointer;touch-action:none;user-select:none;-webkit-user-select:none}
+#awMusicToggle.show{display:flex}
+#awMusicToggle:active{transform:scale(.92)}
+</style>
 </body>
 </html>
 
