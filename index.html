@@ -6901,8 +6901,14 @@ async function loadDynamicCategories(){
         const rows=await r.json();
         if(!Array.isArray(rows) || !rows.length) return;
 
-        const activeName=(wrap.querySelector(".filter-category.active")||{}).textContent?.trim() || "SEMUA";
-        const names=["SEMUA"].concat(rows.map(x=>String(x.name||"").trim()).filter(Boolean));
+        /* V70 HOT FIX: kategori dinamis tidak boleh mengembalikan tombol pertama ke SEMUA.
+           HOT V37 tetap menjadi kategori pertama dan logika/query HOT tidak diubah. */
+        const HOT_LABEL="HOT 🔥";
+        const activeName=(wrap.querySelector(".filter-category.active")||{}).textContent?.trim() || HOT_LABEL;
+        const dynamicNames=rows.map(x=>String(x.name||"").trim()).filter(function(name){
+            return name && name!=="SEMUA" && name!==HOT_LABEL;
+        });
+        const names=[HOT_LABEL].concat(dynamicNames);
         wrap.replaceChildren(...names.map(function(name){
             const btn=document.createElement("button");
             btn.className="filter-category"+(name===activeName?" active":"");
@@ -6912,7 +6918,10 @@ async function loadDynamicCategories(){
         }));
         if(!names.includes(activeName)){
             const first=wrap.querySelector(".filter-category");
-            if(first){ first.classList.add("active"); renderCategoryGames("SEMUA"); }
+            if(first){
+                first.classList.add("active");
+                if(typeof selectCategory==="function") selectCategory(first,HOT_LABEL);
+            }
         }
     }catch(e){
         console.warn("Kategori dinamis belum tersedia; memakai kategori bawaan.",e);
