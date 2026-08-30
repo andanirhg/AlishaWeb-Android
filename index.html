@@ -5825,7 +5825,7 @@ function awToggleMusic(){
 
 <!-- TOMBOL KATEGORI -->
 <section class="filter-category-section">
-  <div class="filter-category-scroll">
+  <div class="filter-category-scroll" id="dynamicCategoryButtons">
     <button class="filter-category active" onclick="selectCategory(this, this.textContent.trim())">SEMUA</button>
 <button class="filter-category" onclick="selectCategory(this, this.textContent.trim())">UWIN</button>
 <button class="filter-category" onclick="selectCategory(this, this.textContent.trim())">UWIN V2</button>
@@ -6887,6 +6887,42 @@ function renderCategoryGames(category){
 
     /* Satu kali swap DOM. Node gambar yang sudah ada hanya dipindahkan, bukan dibuat ulang. */
     grid.replaceChildren(fragment);
+}
+
+/* KATEGORI DINAMIS DARI PANEL ADMIN - fallback ke tombol bawaan jika tabel belum aktif */
+async function loadDynamicCategories(){
+    const wrap=document.getElementById("dynamicCategoryButtons");
+    if(!wrap) return;
+    try{
+        const r=await fetch(SUPABASE_URL+"/rest/v1/categories?select=name,sort_order&active=eq.true&order=sort_order.asc,created_at.asc",{
+            headers:{"apikey":SUPABASE_ANON_KEY}
+        });
+        if(!r.ok) throw new Error("HTTP "+r.status);
+        const rows=await r.json();
+        if(!Array.isArray(rows) || !rows.length) return;
+
+        const activeName=(wrap.querySelector(".filter-category.active")||{}).textContent?.trim() || "SEMUA";
+        const names=["SEMUA"].concat(rows.map(x=>String(x.name||"").trim()).filter(Boolean));
+        wrap.replaceChildren(...names.map(function(name){
+            const btn=document.createElement("button");
+            btn.className="filter-category"+(name===activeName?" active":"");
+            btn.textContent=name;
+            btn.onclick=function(){ selectCategory(btn,name); };
+            return btn;
+        }));
+        if(!names.includes(activeName)){
+            const first=wrap.querySelector(".filter-category");
+            if(first){ first.classList.add("active"); renderCategoryGames("SEMUA"); }
+        }
+    }catch(e){
+        console.warn("Kategori dinamis belum tersedia; memakai kategori bawaan.",e);
+    }
+}
+
+if(document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded",loadDynamicCategories);
+}else{
+    loadDynamicCategories();
 }
 
 /* Kategori aktif + filter kartu */
