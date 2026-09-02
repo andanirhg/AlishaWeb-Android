@@ -6894,11 +6894,10 @@ async function loadDynamicCategories(){
     const wrap=document.getElementById("dynamicCategoryButtons");
     if(!wrap) return;
     try{
-        const r=await fetch(SUPABASE_URL+"/rest/v1/categories?select=name,sort_order&active=eq.true&order=sort_order.asc,created_at.asc",{
-            headers:{"apikey":SUPABASE_ANON_KEY}
-        });
+        const r=await fetch("http://103.67.78.190/api/categories");
         if(!r.ok) throw new Error("HTTP "+r.status);
-        const rows=await r.json();
+        const payload=await r.json();
+        const rows=Array.isArray(payload) ? payload : (Array.isArray(payload.data) ? payload.data : []);
         if(!Array.isArray(rows) || !rows.length) return;
 
         /* V70 HOT FIX: kategori dinamis tidak boleh mengembalikan tombol pertama ke SEMUA.
@@ -9275,23 +9274,29 @@ document.addEventListener("DOMContentLoaded",function(){
      menggantikan HERO statis.
    ============================================================ */
 (function(){
-  function awApiHeaders(){
-    return {
-      "apikey": SUPABASE_ANON_KEY,
-      "Authorization": "Bearer " + SUPABASE_ANON_KEY,
-      "Content-Type": "application/json"
-    };
-  }
+  const AW_VPS_API = "http://103.67.78.190/api";
 
   async function awAdminFetch(path){
-    const response = await fetch(
-      SUPABASE_URL.replace(/\/+$/,"") + path,
-      {headers:awApiHeaders()}
-    );
+    let url;
+    let useVps = false;
+    if(path.indexOf("/rest/v1/apps") === 0){
+      url = AW_VPS_API + "/apps";
+      useVps = true;
+    }else if(path.indexOf("/rest/v1/categories") === 0){
+      url = AW_VPS_API + "/categories";
+      useVps = true;
+    }else if(path.indexOf("/rest/v1/hero_banners") === 0){
+      url = AW_VPS_API + "/hero-banners";
+      useVps = true;
+    }else{
+      url = SUPABASE_URL.replace(/\/+$/,") + path;
+    }
+    const response = await fetch(url,{headers:useVps?{}:{"apikey":SUPABASE_ANON_KEY,"Authorization":"Bearer "+SUPABASE_ANON_KEY}});
     if(!response.ok){
       throw new Error("HTTP " + response.status);
     }
-    return await response.json();
+    const payload = await response.json();
+    return Array.isArray(payload) ? payload : (Array.isArray(payload.data) ? payload.data : []);
   }
 
   function normName(v){
@@ -9474,20 +9479,17 @@ document.addEventListener("DOMContentLoaded",function(){
 (function(){
   async function loadAdminSixCards(){
     try{
-      const response = await fetch(
-        SUPABASE_URL.replace(/\/+$/,"") +
-        "/rest/v1/recommendation_cards?select=id,position,name,icon_url,link_url,active&active=eq.true&order=position.asc",
-        {
-          headers:{
-            "apikey": SUPABASE_ANON_KEY,
-            "Authorization": "Bearer " + SUPABASE_ANON_KEY,
-            "Content-Type": "application/json"
-          }
-        }
-      );
+      const response = await fetch("http://103.67.78.190/api/recommendation-cards");
       if(!response.ok) throw new Error("HTTP " + response.status);
-      const rows=await response.json();
-      if(!Array.isArray(rows)||!rows.length) return;
+      const payload=await response.json();
+      const rows=Array.isArray(payload)?payload:(Array.isArray(payload.data)?payload.data:[]);
+
+      const allCards=[...document.querySelectorAll(".category-section .category-grid .category-card")].slice(0,6);
+      if(!rows.length){
+        allCards.forEach(function(card){ card.remove(); });
+        window.__alishaRecommendationCards=[];
+        return;
+      }
 
       const cards=[...document.querySelectorAll(".category-section .category-grid .category-card")].slice(0,6);
       window.__alishaRecommendationCards = rows.slice(0,6);
