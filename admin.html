@@ -67,8 +67,8 @@ label{font-size:12px;opacity:.8}
 
   <section id="loginCard" class="card">
     <h2>Login Admin</h2>
-    <label>Email</label>
-    <input id="email" type="email" autocomplete="username" placeholder="Email admin">
+    <label>Username</label>
+    <input id="email" type="text" autocomplete="username" placeholder="Username admin">
     <label>Password</label>
     <input id="password" type="password" autocomplete="current-password" placeholder="Password">
     <button class="primary" style="width:100%" onclick="loginAdmin()">MASUK</button>
@@ -371,15 +371,17 @@ async function syncLegacyContentToAdmin(){
 async function loginAdmin(){
   hideStatus("loginStatus");
   try{
-    const data=await req("/auth/v1/token?grant_type=password",{
+    const r=await fetch("/api/admin/login",{
       method:"POST",
-      body:JSON.stringify({email:email.value.trim(),password:password.value})
-    },false);
-    accessToken=data.access_token; refreshToken=data.refresh_token||"";
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({username:email.value.trim(),password:password.value})
+    });
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok || !data.success) throw new Error(data.message || "Login gagal");
+    accessToken="vps-admin-session";
+    refreshToken="";
     localStorage.setItem("aw_admin_access_token",accessToken);
-    localStorage.setItem("aw_admin_refresh_token",refreshToken);
-    const ok=await checkAdmin();
-    if(!ok) throw new Error("Akun ini bukan admin AlishaWeb.");
+    localStorage.removeItem("aw_admin_refresh_token");
     enterAdmin();
   }catch(e){ showStatus("loginStatus","Gagal login: "+e.message); }
 }
@@ -392,9 +394,7 @@ async function checkAdmin(){
 }
 
 async function restoreSession(){
-  if(!accessToken) return;
-  if(await checkAdmin()) enterAdmin();
-  else logout();
+  if(accessToken==="vps-admin-session") enterAdmin();
 }
 
 async function enterAdmin(){

@@ -5274,6 +5274,11 @@ header > img,
 }
 </style>
 
+
+<style id="apkWhatsAppJoinFix">
+.apk-whatsapp-icon{transform:none!important;}
+.apk-whatsapp-icon img{width:23px;height:23px;display:block;}
+</style>
 </head>
 
 <body>
@@ -6894,7 +6899,7 @@ async function loadDynamicCategories(){
     const wrap=document.getElementById("dynamicCategoryButtons");
     if(!wrap) return;
     try{
-        const r=await fetch("http://103.67.78.190/api/categories");
+        const r=await fetch("/api/categories");
         if(!r.ok) throw new Error("HTTP "+r.status);
         const payload=await r.json();
         const rows=Array.isArray(payload) ? payload : (Array.isArray(payload.data) ? payload.data : []);
@@ -7651,11 +7656,11 @@ else{
 </div>
 
 
-            <a class="apk-telegram-join"
+            <a class="apk-telegram-join apk-whatsapp-join"
                href="https://chat.whatsapp.com/HePZ41k6GWWHu6oVIPMKg0?s=cl&amp;p=a&amp;mlu=4"
                target="_blank"
                rel="noopener noreferrer">
-                <span class="apk-telegram-icon"><img src="https://cdn.simpleicons.org/whatsapp/FFFFFF" alt="WhatsApp" style="width:100%;height:100%;object-fit:contain;"></span>
+                <span class="apk-telegram-icon apk-whatsapp-icon"><img src="https://cdn.simpleicons.org/whatsapp/FFFFFF" alt="WhatsApp"></span>
                 <span class="apk-telegram-copy">
                     <strong>Join info rilis APK baru tercepat</strong>
                 </span>
@@ -9274,7 +9279,7 @@ document.addEventListener("DOMContentLoaded",function(){
      menggantikan HERO statis.
    ============================================================ */
 (function(){
-  const AW_VPS_API = "http://103.67.78.190/api";
+  const AW_VPS_API = "/api";
 
   async function awAdminFetch(path){
     let url;
@@ -9479,7 +9484,7 @@ document.addEventListener("DOMContentLoaded",function(){
 (function(){
   async function loadAdminSixCards(){
     try{
-      const response = await fetch("http://103.67.78.190/api/recommendation-cards");
+      const response = await fetch("/api/recommendation-cards");
       if(!response.ok) throw new Error("HTTP " + response.status);
       const payload=await response.json();
       const rows=Array.isArray(payload)?payload:(Array.isArray(payload.data)?payload.data:[]);
