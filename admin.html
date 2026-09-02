@@ -238,17 +238,177 @@ function showStatus(id,text){
 }
 function hideStatus(id){ document.getElementById(id).classList.add("hidden"); }
 
-async function req(path, options={}, auth=true){
-  const headers=Object.assign({
-    "apikey":SUPABASE_KEY,
-    "Content-Type":"application/json"
-  },options.headers||{});
-  if(auth && accessToken) headers.Authorization="Bearer "+accessToken;
-  const r=await fetch(SUPABASE_URL+path,Object.assign({},options,{headers}));
+async function vpsJson(url, options={}){
+  const opts=Object.assign({},options);
+  const headers=Object.assign({},opts.headers||{});
+  if(opts.body && !(opts.body instanceof FormData) && !headers["Content-Type"]){
+    headers["Content-Type"]="application/json";
+  }
+  delete headers.apikey;
+  delete headers.Authorization;
+  delete headers.Prefer;
+  opts.headers=headers;
+  const r=await fetch(url,opts);
   const txt=await r.text();
-  let body=null; if(txt){try{body=JSON.parse(txt)}catch(e){body=txt}}
-  if(!r.ok) throw new Error((body&&(body.message||body.msg||body.error_description||body.hint))||("HTTP "+r.status));
+  let body=null;
+  if(txt){ try{ body=JSON.parse(txt); }catch(e){ body=txt; } }
+  if(!r.ok){
+    const msg=(body&&(body.error||body.message||body.msg)) || (typeof body==="string"?body:"") || ("HTTP "+r.status);
+    throw new Error(msg);
+  }
   return body;
+}
+
+function unwrapRows(body){
+  if(body && Array.isArray(body.data)) return body.data;
+  if(body && body.data && typeof body.data==="object") return [body.data];
+  if(Array.isArray(body)) return body;
+  return [];
+}
+function normalizeAppRow(r){
+  return Object.assign({},r,{
+    icon_url:(r&&((r.icon_url??r.icon)))||null,
+    download_url:(r&&((r.download_url??r.link)))||null,
+    active:r&&r.active!==false
+  });
+}
+function normalizeSixRow(r){
+  return Object.assign({},r,{
+    icon_url:(r&&((r.icon_url??r.icon)))||null,
+    link_url:(r&&((r.link_url??r.link)))||null,
+    position:Number((r&&((r.position??r.sort_order)))||0)
+  });
+}
+function normalizeHeroRow(r){
+  return Object.assign({},r,{
+    image_url:(r&&((r.image_url??r.image)))||null,
+    link_url:(r&&((r.link_url??r.link)))||null,
+    sort_order:Number((r&&((r.sort_order??r.position)))||0),
+    active:r&&r.active!==false
+  });
+}
+function idEqFromPath(path){
+  const m=String(path).match(/[?&]id=eq\.([^&]+)/);
+  return m?decodeURIComponent(m[1]):"";
+}
+function parseBody(options){
+  if(!options||options.body==null) return {};
+  if(typeof options.body==="string"){
+    try{return JSON.parse(options.body)||{};}catch(e){return {};}
+  }
+  return options.body||{};
+}
+async function req(path, options={}, auth=true){
+  const method=String(options.method||"GET").toUpperCase();
+  const payload=parseBody(options);
+
+  if(path==="/rest/v1/rpc/is_admin") return true;
+
+  if(path.startsWith("/rest/v1/rpc/admin_move_category")){
+    const rows=unwrapRows(await vpsJson("/api/categories"));
+    const ordered=rows.slice().sort((a,b)=>(Number(a.sort_order)||0)-(Number(b.sort_order)||0));
+    const idx=ordered.findIndex(r=>String(r.id)===String(payload.p_id));
+    const other=payload.p_direction==="up"?idx-1:idx+1;
+    if(idx<0||other<0||other>=ordered.length) return true;
+    const a=ordered[idx], b=ordered[other];
+    const ao=Number(a.sort_order)||((idx+1)*10), bo=Number(b.sort_order)||((other+1)*10);
+    await vpsJson("/api/categories/"+encodeURIComponent(a.id),{method:"PUT",body:JSON.stringify({sort_order:bo})});
+    await vpsJson("/api/categories/"+encodeURIComponent(b.id),{method:"PUT",body:JSON.stringify({sort_order:ao})});
+    return true;
+  }
+  if(path.startsWith("/rest/v1/rpc/admin_rename_category")){
+    await vpsJson("/api/categories/"+encodeURIComponent(payload.p_id),{method:"PUT",body:JSON.stringify({name:payload.p_new_name,updated_at:new Date().toISOString()})});
+    return true;
+  }
+  if(path.startsWith("/rest/v1/rpc/admin_delete_category")){
+    const cats=unwrapRows(await vpsJson("/api/categories"));
+    const row=cats.find(r=>String(r.id)===String(payload.p_id));
+    const apps=unwrapRows(await vpsJson("/api/apps")).map(normalizeAppRow);
+    if(row && apps.some(a=>String(a.category||"").toUpperCase()===String(row.name||"").toUpperCase())){
+      throw new Error("Kategori masih dipakai APK. Pindahkan APK ke kategori lain dulu.");
+    }
+    await vpsJson("/api/categories/"+encodeURIComponent(payload.p_id),{method:"DELETE"});
+    return true;
+  }
+
+  if(path.startsWith("/rest/v1/apps")){
+    const id=idEqFromPath(path);
+    if(method==="GET"){
+      let rows=unwrapRows(await vpsJson("/api/apps")).map(normalizeAppRow);
+      rows.sort((a,b)=>String(b.updated_at||b.created_at||"").localeCompare(String(a.updated_at||a.created_at||"")));
+      return rows;
+    }
+    if(method==="DELETE"){
+      const before=unwrapRows(await vpsJson("/api/apps")).map(normalizeAppRow).find(r=>String(r.id)===String(id));
+      await vpsJson("/api/apps/"+encodeURIComponent(id),{method:"DELETE"});
+      return before?[before]:[];
+    }
+    const out=Object.assign({},payload);
+    if(Object.prototype.hasOwnProperty.call(out,"icon_url")) out.icon=out.icon_url;
+    if(Object.prototype.hasOwnProperty.call(out,"download_url")) out.link=out.download_url;
+    const endpoint=id?"/api/apps/"+encodeURIComponent(id):"/api/apps";
+    const body=await vpsJson(endpoint,{method:id?"PUT":"POST",body:JSON.stringify(out)});
+    const rows=unwrapRows(body).map(normalizeAppRow);
+    return options.headers&&String(options.headers.Prefer||"").includes("representation")?rows:(rows[0]||body);
+  }
+
+  if(path.startsWith("/rest/v1/categories")){
+    const id=idEqFromPath(path);
+    if(method==="GET"){
+      let rows=unwrapRows(await vpsJson("/api/categories"));
+      rows=rows.filter(r=>r.active!==false).sort((a,b)=>(Number(a.sort_order)||0)-(Number(b.sort_order)||0));
+      return rows;
+    }
+    if(method==="DELETE"){
+      await vpsJson("/api/categories/"+encodeURIComponent(id),{method:"DELETE"});
+      return [];
+    }
+    const endpoint=id?"/api/categories/"+encodeURIComponent(id):"/api/categories";
+    const body=await vpsJson(endpoint,{method:id?"PUT":"POST",body:JSON.stringify(payload)});
+    return unwrapRows(body);
+  }
+
+  if(path.startsWith("/rest/v1/recommendation_cards")){
+    const id=idEqFromPath(path);
+    if(method==="GET"){
+      let rows=unwrapRows(await vpsJson("/api/recommendation-cards")).map(normalizeSixRow);
+      rows.sort((a,b)=>(Number(a.position)||0)-(Number(b.position)||0));
+      return rows;
+    }
+    const out=Object.assign({},payload);
+    if(Object.prototype.hasOwnProperty.call(out,"icon_url")) out.icon=out.icon_url;
+    if(Object.prototype.hasOwnProperty.call(out,"link_url")) out.link=out.link_url;
+    const endpoint=id?"/api/recommendation-cards/"+encodeURIComponent(id):"/api/recommendation-cards";
+    if(method==="DELETE"){
+      await vpsJson(endpoint,{method:"DELETE"}); return [];
+    }
+    const body=await vpsJson(endpoint,{method:id?"PUT":"POST",body:JSON.stringify(out)});
+    return unwrapRows(body).map(normalizeSixRow);
+  }
+
+  if(path.startsWith("/rest/v1/hero_banners")){
+    const id=idEqFromPath(path);
+    if(method==="GET"){
+      let rows=unwrapRows(await vpsJson("/api/hero-banners")).map(normalizeHeroRow);
+      const imageMatch=String(path).match(/[?&]image_url=eq\.([^&]+)/);
+      if(imageMatch){ const val=decodeURIComponent(imageMatch[1]); rows=rows.filter(r=>String(r.image_url||"")===val); }
+      rows.sort((a,b)=>(Number(a.sort_order)||0)-(Number(b.sort_order)||0));
+      return rows;
+    }
+    if(method==="DELETE"){
+      const before=unwrapRows(await vpsJson("/api/hero-banners")).map(normalizeHeroRow).find(r=>String(r.id)===String(id));
+      await vpsJson("/api/hero-banners/"+encodeURIComponent(id),{method:"DELETE"});
+      return before?[before]:[];
+    }
+    const out=Object.assign({},payload);
+    if(Object.prototype.hasOwnProperty.call(out,"image_url")) out.image=out.image_url;
+    if(Object.prototype.hasOwnProperty.call(out,"link_url")) out.link=out.link_url;
+    const endpoint=id?"/api/hero-banners/"+encodeURIComponent(id):"/api/hero-banners";
+    const body=await vpsJson(endpoint,{method:id?"PUT":"POST",body:JSON.stringify(out)});
+    return unwrapRows(body).map(normalizeHeroRow);
+  }
+
+  throw new Error("Endpoint admin belum dimigrasikan: "+path);
 }
 
 
@@ -354,19 +514,7 @@ async function syncLegacyHeroesToAdmin(){
   };
 }
 
-async function syncLegacyContentToAdmin(){
-  if(legacySyncDone) return;
-  legacySyncDone = true;
-
-  const results = await Promise.allSettled([
-    syncLegacyAppsToAdmin(),
-    syncLegacyHeroesToAdmin()
-  ]);
-
-  if(results[1] && results[1].status==="rejected"){
-    console.warn("Sinkronisasi HERO bawaan gagal:",results[1].reason);
-  }
-}
+async function syncLegacyContentToAdmin(){ return; }
 
 async function loginAdmin(){
   hideStatus("loginStatus");
@@ -518,54 +666,24 @@ function clearSelectedImage(kind){
 
 async function uploadAdminImage(file,folder){
   if(!file) return null;
-  const ext=(file.name.split(".").pop()||"jpg").replace(/[^a-zA-Z0-9]/g,"").toLowerCase() || "jpg";
-  const name=folder+"/"+Date.now()+"-"+Math.random().toString(36).slice(2,9)+"."+ext;
-  const r=await fetch(
-    SUPABASE_URL+"/storage/v1/object/"+STORAGE_BUCKET+"/"+name,
-    {
-      method:"POST",
-      headers:{
-        "apikey":SUPABASE_KEY,
-        "Authorization":"Bearer "+accessToken,
-        "Content-Type":file.type || "application/octet-stream",
-        "x-upsert":"false"
-      },
-      body:file
-    }
-  );
+  const fd=new FormData();
+  fd.append("file",file,file.name||"image.jpg");
+  const r=await fetch("/api/upload",{method:"POST",body:fd});
   const txt=await r.text();
-  if(!r.ok){
-    let msg=txt;
-    try{const j=JSON.parse(txt);msg=j.message||j.error||txt}catch(e){}
-    throw new Error("Upload gambar gagal: "+msg);
-  }
-  return SUPABASE_URL+"/storage/v1/object/public/"+STORAGE_BUCKET+"/"+name;
+  let body={};
+  try{body=txt?JSON.parse(txt):{};}catch(e){body={error:txt};}
+  if(!r.ok || !body.success) throw new Error("Upload gambar gagal: "+(body.error||body.message||("HTTP "+r.status)));
+  if(body.filename) return "/uploads/"+encodeURIComponent(body.filename);
+  return body.url||null;
 }
 
 function storageObjectPathFromPublicUrl(url){
-  if(!url) return null;
-  const prefix=SUPABASE_URL+"/storage/v1/object/public/"+STORAGE_BUCKET+"/";
-  if(!url.startsWith(prefix)) return null;
-  return decodeURIComponent(url.slice(prefix.length));
+  return null;
 }
 
 async function deleteUploadedImage(url){
-  const objectPath=storageObjectPathFromPublicUrl(url);
-  if(!objectPath) return;
-  const r=await fetch(
-    SUPABASE_URL+"/storage/v1/object/"+STORAGE_BUCKET+"/"+objectPath,
-    {
-      method:"DELETE",
-      headers:{
-        "apikey":SUPABASE_KEY,
-        "Authorization":"Bearer "+accessToken
-      }
-    }
-  );
-  // Jika file sudah tidak ada, penghapusan data APK/HERO tetap dianggap berhasil.
-  if(!r.ok && r.status!==404){
-    console.warn("Gagal membersihkan file Storage:", await r.text());
-  }
+  // File upload VPS dibiarkan tersimpan agar URL yang masih dipakai data lain tidak rusak.
+  return;
 }
 
 
@@ -929,42 +1047,7 @@ async function saveSixCard(id,position){
 }
 
 
-async function forceSyncLegacyHeroes(){
-  try{
-    showStatus("heroStatus","Mengambil HERO bawaan dari project...");
-
-    const result = await syncLegacyHeroesToAdmin();
-    await loadHero();
-
-    if(result.total <= 0){
-      const detail = result.errors.length
-        ? result.errors.slice(0,2).join(" | ")
-        : "Supabase masih mengembalikan 0 data HERO.";
-      throw new Error(detail);
-    }
-
-    if(result.errors.length){
-      showStatus(
-        "heroStatus",
-        "HERO terbaca "+result.total+
-        ". Berhasil menambahkan "+result.inserted+
-        ", tetapi ada "+result.errors.length+" yang gagal."
-      );
-      console.warn("Detail gagal import HERO:",result.errors);
-      return;
-    }
-
-    showStatus(
-      "heroStatus",
-      "Berhasil. "+result.total+
-      " HERO sekarang tersedia di Panel Admin"+
-      (result.inserted ? " ("+result.inserted+" baru ditambahkan)." : ".")
-    );
-  }catch(e){
-    await loadHero().catch(()=>{});
-    showStatus("heroStatus","Gagal memuat HERO bawaan: "+e.message);
-  }
-}
+async function forceSyncLegacyHeroes(){ showStatus("heroStatus","HERO bawaan lama dinonaktifkan. Gunakan Tambah HERO untuk data Firestore/VPS."); }
 
 async function loadHero(){
   try{
