@@ -17,7 +17,7 @@ jobs:
       - name: Extract project
         run: |
           rm -rf android-project
-          unzip AlishaWeb-V72-LOCAL-VPS-TEST.zip -d android-project
+          unzip AlishaWeb-V73-VPS-6-CARDS.zip -d android-project
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
