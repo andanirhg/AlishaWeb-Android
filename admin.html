@@ -232,6 +232,19 @@ let legacySyncDone = false;
 
 let cachedApps = [];
 let cachedCategories = [];
+const DEFAULT_CATEGORIES = [
+  {name:"UWIN",sort_order:10},
+  {name:"UWIN V2",sort_order:20},
+  {name:"HOKI GAMES",sort_order:30},
+  {name:"UONO GAMES",sort_order:40},
+  {name:"KUNING/BIRU",sort_order:50},
+  {name:"PP/JKT",sort_order:60},
+  {name:"ALL HIWIN",sort_order:70},
+  {name:"RSN/SVIP",sort_order:80},
+  {name:"ZK GAMES",sort_order:90},
+  {name:"IX777",sort_order:100},
+  {name:"RANDOM",sort_order:110}
+];
 
 function showStatus(id,text){
   const el=document.getElementById(id); el.textContent=text; el.classList.remove("hidden");
@@ -724,8 +737,44 @@ function clearAppSearch(){
   appSearch.focus();
 }
 
+async function ensureDefaultCategories(){
+  let rows=await req("/rest/v1/categories?select=id,name,sort_order&active=eq.true&order=sort_order.asc,created_at.asc");
+  rows=Array.isArray(rows)?rows:[];
+  const byName=new Map(rows.map(r=>[String(r.name||"").trim().toUpperCase(),r]));
+
+  for(const def of DEFAULT_CATEGORIES){
+    if(!byName.has(def.name)){
+      await req("/rest/v1/categories",{
+        method:"POST",
+        headers:{Prefer:"return=minimal"},
+        body:JSON.stringify({name:def.name,sort_order:def.sort_order,active:true})
+      });
+    }
+  }
+
+  rows=await req("/rest/v1/categories?select=id,name,sort_order&active=eq.true&order=sort_order.asc,created_at.asc");
+  rows=Array.isArray(rows)?rows:[];
+
+  const defaults=new Set(DEFAULT_CATEGORIES.map(x=>x.name));
+  let nextOrder=120;
+  for(const row of rows.filter(r=>!defaults.has(String(r.name||"").trim().toUpperCase()))){
+    const order=Number(row.sort_order)||0;
+    if(order<120){
+      await req("/rest/v1/categories?id=eq."+encodeURIComponent(row.id),{
+        method:"PATCH",
+        headers:{Prefer:"return=minimal"},
+        body:JSON.stringify({sort_order:nextOrder,updated_at:new Date().toISOString()})
+      });
+      nextOrder+=10;
+    } else {
+      nextOrder=Math.max(nextOrder,order+10);
+    }
+  }
+}
+
 async function loadCategories(){
   try{
+    await ensureDefaultCategories();
     const rows=await req("/rest/v1/categories?select=id,name,sort_order&active=eq.true&order=sort_order.asc,created_at.asc");
     cachedCategories=Array.isArray(rows)?rows:[];
     const selected=appCategory.value;
@@ -780,7 +829,7 @@ async function addCategory(){
 
 async function moveCategory(id,direction){
   try{
-    await req("/rest/v1/rpc/admin_move_category",{method:"POST",body:JSON.stringify({p_id:Number(id),p_direction:direction})});
+    await req("/rest/v1/rpc/admin_move_category",{method:"POST",body:JSON.stringify({p_id:String(id),p_direction:direction})});
     showStatus("categoryStatus",direction==="up"?"Kategori digeser naik.":"Kategori digeser turun.");
     await loadCategories();
   }catch(e){ showStatus("categoryStatus","Gagal ubah urutan: "+e.message); }
@@ -797,7 +846,7 @@ async function editCategory(id){
   if(cachedCategories.some(r=>String(r.id)!==String(id) && String(r.name||"").toUpperCase()===newName))
     return showStatus("categoryStatus","Kategori dengan nama itu sudah ada.");
   try{
-    await req("/rest/v1/rpc/admin_rename_category",{method:"POST",body:JSON.stringify({p_id:Number(id),p_new_name:newName})});
+    await req("/rest/v1/rpc/admin_rename_category",{method:"POST",body:JSON.stringify({p_id:String(id),p_new_name:newName})});
     showStatus("categoryStatus","Kategori berhasil diubah.");
     await Promise.all([loadCategories(),loadApps()]);
   }catch(e){ showStatus("categoryStatus","Gagal edit: "+e.message); }
@@ -808,7 +857,7 @@ async function deleteCategory(id){
   if(!row) return;
   if(!confirm('Hapus kategori "'+row.name+'"?')) return;
   try{
-    await req("/rest/v1/rpc/admin_delete_category",{method:"POST",body:JSON.stringify({p_id:Number(id)})});
+    await req("/rest/v1/rpc/admin_delete_category",{method:"POST",body:JSON.stringify({p_id:String(id)})});
     showStatus("categoryStatus","Kategori berhasil dihapus.");
     await loadCategories();
   }catch(e){ showStatus("categoryStatus","Gagal hapus: "+e.message); }
@@ -913,15 +962,33 @@ async function loadSixCards(){
   try{
     const rows=await req("/rest/v1/recommendation_cards?select=*&order=position.asc");
     const list=Array.isArray(rows)?rows:[];
-    sixCardsList.innerHTML=list.map(r=>`
-      <div class="item" data-six-id="${esc(r.id)}">
-        ${r.icon_url?`<img class="preview" src="${esc(r.icon_url)}">`:""}
-        <div class="item-title">Posisi ${r.position} · ${esc(r.name)}</div>
-        <div class="small">${esc(r.link_url||"")}</div>
-        <div class="row" style="margin-top:8px">
-          <button class="muted" onclick='editSixCard(${JSON.stringify(JSON.stringify(r))})'>✏️ EDIT KARTU</button>
-        </div><div class="clear"></div>
-      </div>`).join("") || '<div class="small" style="margin-top:10px">Data 6 kartu belum tersedia. Jalankan SQL V6 terlebih dahulu.</div>';
+    const byPos=new Map(list.map(r=>[Number(r.position),r]));
+    const slots=[];
+    for(let position=1; position<=6; position++){
+      const r=byPos.get(position);
+      if(r){
+        slots.push(`
+          <div class="item" data-six-id="${esc(r.id)}">
+            ${r.icon_url?`<img class="preview" src="${esc(r.icon_url)}">`:""}
+            <div class="item-title">Posisi ${position} · ${esc(r.name||"")}</div>
+            <div class="small">${esc(r.link_url||"")}</div>
+            <div class="row" style="margin-top:8px">
+              <button class="muted" onclick='editSixCard(${JSON.stringify(JSON.stringify(r))})'>✏️ EDIT KARTU</button>
+            </div><div class="clear"></div>
+          </div>`);
+      }else{
+        const empty={id:"",position:position,name:"",icon_url:"",link_url:""};
+        slots.push(`
+          <div class="item" data-six-position="${position}">
+            <div class="item-title">Posisi ${position} · Belum diisi</div>
+            <div class="small">Tambahkan nama, icon, dan link untuk kartu posisi ${position}.</div>
+            <div class="row" style="margin-top:8px">
+              <button class="primary" onclick='editSixCard(${JSON.stringify(JSON.stringify(empty))})'>➕ TAMBAH KARTU</button>
+            </div><div class="clear"></div>
+          </div>`);
+      }
+    }
+    sixCardsList.innerHTML=slots.join("");
   }catch(e){
     sixCardsList.innerHTML='<div class="status">Gagal memuat 6 kartu: '+esc(e.message)+'</div>';
   }
@@ -1025,21 +1092,35 @@ async function saveSixCard(id,position){
       icon=await uploadAdminImage(window.__sixSelectedFile,"recommendation");
     }
     if(!icon) throw new Error("Icon kartu wajib diisi.");
-    await req(
-      "/rest/v1/recommendation_cards?id=eq."+encodeURIComponent(id),
-      {
-        method:"PATCH",
-        headers:{Prefer:"return=minimal"},
-        body:JSON.stringify({
-          name:name,
-          icon_url:icon,
-          link_url:link||"#",
-          updated_at:new Date().toISOString()
-        })
-      }
-    );
+    const payload={
+      name:name,
+      icon_url:icon,
+      link_url:link||"#",
+      position:Number(position),
+      updated_at:new Date().toISOString()
+    };
+    if(id){
+      await req(
+        "/rest/v1/recommendation_cards?id=eq."+encodeURIComponent(id),
+        {
+          method:"PATCH",
+          headers:{Prefer:"return=minimal"},
+          body:JSON.stringify(payload)
+        }
+      );
+    }else{
+      payload.created_at=new Date().toISOString();
+      await req(
+        "/rest/v1/recommendation_cards",
+        {
+          method:"POST",
+          headers:{Prefer:"return=representation"},
+          body:JSON.stringify(payload)
+        }
+      );
+    }
     closeSixEdit();
-    showStatus("sixStatus","Kartu posisi "+position+" berhasil diperbarui.");
+    showStatus("sixStatus","Kartu posisi "+position+(id?" berhasil diperbarui.":" berhasil ditambahkan."));
     await loadSixCards();
   }catch(e){
     alert("Gagal menyimpan kartu: "+e.message);
